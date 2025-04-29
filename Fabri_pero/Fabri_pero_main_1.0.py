@@ -14,17 +14,19 @@ from tkinter import filedialog
 class App:
     def __init__(self):
         self.win = tk.Tk()
-        photo = tk.PhotoImage(file='icon1.png')
-        self.win.title("Построение графика")
+        photo = tk.PhotoImage(file='icon1.png') #_internal\
+        self.win.title("Обработка данных интерферометра Фабри-перо")
         self.win.iconphoto(False, photo)
         self.win.config(bg='#696969')
         self.win.geometry("1210x755")
         self.win.resizable(False, False)
         self.entry_var1 = tk.StringVar()
         self.entry_var2 = tk.StringVar()
+        self.threshold = tk.StringVar()
         self.d = tk.StringVar()
         self.v = tk.StringVar()
         self.enabled = tk.IntVar(value=1)
+        self.tip_graf = tk.IntVar(value=0)
         self.x1 = '0'
         self.x2 = '0'
         self.file = ''
@@ -40,8 +42,8 @@ class App:
 
         self.get = tk.Button(text="Рассчитать V", command=self.formula, bg='#9c9c9c').place(x=1050, y=346)
 
-        self.max_checkbutton = tk.Checkbutton(text="Максимумы", variable=self.enabled, command=self.checkbutton_changed,
-                                              bg='#9c9c9c').place(x=465, y=345)
+        self.max_checkbutton = tk.Checkbutton(text="Максимумы", variable=self.enabled, command=self.checkbutton_changed,bg='#9c9c9c').place(x=465, y=345)
+        self.max_checkbutton = tk.Checkbutton(text="График без обработки", variable=self.tip_graf, command=self.checkbutton_changed,bg='#9c9c9c').place(x=1005, y=140)
 
         self.X_lb = tk.Label(text="x центра", bg='#9c9c9c').place(x=466, y=35)
         self.X_tf = tk.Entry().place(x=466, y=60, width=70)
@@ -55,9 +57,14 @@ class App:
         self.xgr2_lb = tk.Label(text="до R", bg='#9c9c9c').place(x=720, y=345)
         self.xgr2_tf = tk.Entry(textvariable=self.entry_var2).place(x=763, y=345, width=70)
 
+        self.threshold_lb = tk.Label(text="Порог бинаризации (0-255)", bg='#9c9c9c').place(x=1000, y=55)
+        self.threshold_tf = tk.Entry(textvariable=self.threshold).place(x=1063, y=95, width=70)
+
         self.d_lb = tk.Label(text="Введите d", bg='#9c9c9c').place(x=1060, y=230)
         self.d_tf = tk.Entry(textvariable=self.d).place(x=1063, y=270, width=70)
-        self.v_tf = tk.Entry(textvariable=self.v).place(x=1065, y=385, width=70)
+        self.d_lb = tk.Label(text="см", bg='#696969', font=("Arial", 13, "bold")).place(x=1136, y=269)
+        self.v_tf = tk.Entry(textvariable=self.v).place(x=1063, y=385, width=70)
+        self.d_lb = tk.Label(text="см⁻¹", bg='#696969', font=("Arial", 13, "bold")).place(x=1136, y=384)
 
         # Добавим изображение
         self.canvas1 = tk.Canvas(self.win, height=300, width=450, highlightbackground='#000000')
@@ -89,12 +96,17 @@ class App:
             self.image_out1 = self.image.resize((width, height))
             self.photo = ImageTk.PhotoImage(self.image_out1)
             self.c_image = self.canvas1.create_image(225, 150, anchor="center", image=self.photo)
+            self.x1 = '0'
+            self.x2 = '0'
+            self.threshold = tk.StringVar()
+            self.threshold_tf = tk.Entry(textvariable=self.threshold).place(x=1063, y=95, width=70)
+
         else:
             print("Не выбран файл")
 
     def find_cent(self):
-        img = Image.open(self.file)
-        image = img
+        self.img = Image.open(self.file)
+        image = self.img
         data = []
         cx = 0
         cy = 0
@@ -106,26 +118,15 @@ class App:
         self.rad = 100
 
         # бинаризация
-        img = img.convert("L")
-        threshold = 150
-        img = img.point(lambda x: 255 if x > threshold else 0)
+        self.img = self.img.convert("L")
+        # проверять пустое ли окно self.threshold.get()
+        data = self.get_data()
+        self.threshold = tk.StringVar(self.win, self.threshold)
+        self.threshold_tf = tk.Entry(textvariable=self.threshold).place(x=1063, y=95, width=70)
 
-        img_arr = np.asarray(img)
-
-        for stroka in range(len(img_arr)):
-            for stolb in range(len(img_arr[stroka])):
-                # значение пикселя, stroka - номер строчки, stolb - номер столбца
-                if img_arr[stroka][stolb] == 255:
-                    data.append([stolb, stroka])
-        # print(len(data), '- пикселей')
-
-        if len(data) > 2_000_000 or len(data) < 6000:
-            return None
-
-        clusters = []
         data_np = np.array(data)
 
-        clustering = DBSCAN(eps=2).fit(data_np)
+        clustering = DBSCAN(eps=3).fit(data_np)
         labels = clustering.labels_
 
         unique_labels, counts = np.unique(labels[labels != -1], return_counts=True)  # исключаем шум (-1)
@@ -134,8 +135,7 @@ class App:
 
         unique_labels = set(large_clusters) - {-1}  # Получаем уникальные метки (исключая шум -1)
 
-        clusters = [data_np[labels == label].tolist() for label in
-                    unique_labels]  # Создаем список кластеров: каждый кластер — массив его точек
+        clusters = [data_np[labels == label].tolist() for label in unique_labels]  # Создаем список кластеров: каждый кластер — массив его точек
 
         cl = max(clusters, key=len)
         inf = [max(cl), min(cl), max(cl, key=lambda x: x[1]), min(cl, key=lambda x: x[1])]  # крайние точки по x и y
@@ -152,7 +152,7 @@ class App:
                 kr.append([p for p in cl if p[1] == inf[i][1]])
         tip = len([1 for kr_i in kr if len(kr_i) > 20])
         # print(tip, 'tip')
-        if tip == 0:  # должен быть 0
+        if tip == 0:
             cx = (inf[0][0] + inf[1][0]) / 2
             cy = (inf[2][1] + inf[3][1]) / 2
             cen = [cx, cy]
@@ -266,14 +266,14 @@ class App:
         self.photo_out = ImageTk.PhotoImage(self.image_out2)
         self.cn_image_out = self.canvas2.create_image(225, 150, anchor="center", image=self.photo_out)
 
+        self.max_radius = int(dist(self.cen, [0, 0]))  # максимальное расстояние до края изображения
+
     def graf(self):
         # загрузка изображения (преобразование в градации серого)
         image = Image.open(self.file).convert('L')
         image_np = np.array(image)
 
         cx, cy = self.cen
-
-        max_radius = int(dist(self.cen, [0,0])) # максимальное расстояние до края изображения
 
         # радиусы и средняя яркость
         radii = []
@@ -282,7 +282,7 @@ class App:
         data_min = []
 
         # проход по радиусам от 0 до максимального расстояния
-        for r in range(self.rad, int(max_radius)):
+        for r in range(int(self.rad*1.1), int(self.max_radius)):
             brightness_for_r = [] # яркость точек на текущем радиусе
 
             # проход по всем углам
@@ -305,37 +305,49 @@ class App:
                 radii.append(r)
 
         # преобразуем списки в массивы и берем квадраты x
-        radii = np.array([rad ** 2 for rad in radii])
-        mean_brightness = np.array(mean_brightness)
+        if self.x2 != '0':  # обновление краев графика  
+            radii = np.array([rad ** 2 for rad in radii])
+            mean_brightness = np.array(mean_brightness)
+            sp_ind = np.array([ind for ind in range(len(radii)) if radii[ind] > int(self.x1) and radii[ind] < int(self.x2)])
+            radii = radii[sp_ind]
+            mean_brightness = mean_brightness[sp_ind]
+        else:
+            radii = np.array([rad ** 2 for rad in radii])
+            mean_brightness = np.array(mean_brightness)
 
         # Поиск максимумов
-        peaks, _ = find_peaks(mean_brightness, prominence=5) # нахожу индексы максимумов и отсеиваю лишние
+        peaks, _ = find_peaks(mean_brightness, prominence=3) # нахожу индексы максимумов и отсеиваю лишние 3
         peaks_min, _ = find_peaks(-mean_brightness, prominence=1)
 
-        ind_min = np.where(radii > radii[peaks_min][0])[0]  # Индексы элементов > radii[peaks_min][0]
-        radii = radii[ind_min]
-        mean_brightness = mean_brightness[ind_min]
-        distance = abs(radii[peaks-ind_min[0]][0] - radii[peaks-ind_min[0]][1])*1.2
+        if self.tip_graf.get() == 0: # обработка графика
+            ind_min = np.where(radii > radii[peaks_min][0])[0]  # Индексы элементов > radii[peaks_min][0]
+            radii = radii[ind_min]
+            mean_brightness = mean_brightness[ind_min]
+            self.distance = abs(radii[peaks-ind_min[0]][0] - radii[peaks-ind_min[0]][1])*1.2 # расстояние между первыми двумя максимумами
+            self.distance_eps = abs(radii[peaks-ind_min[0]][0] - radii[peaks-ind_min[0]][2])*1.2 # расстояние между первым и третим максимумами
 
-        for x, y in zip(radii[peaks-ind_min[0]], mean_brightness[peaks-ind_min[0]]):
-            self.data_max.append([x, y])
+            for x, y in zip(radii[peaks-ind_min[0]], mean_brightness[peaks-ind_min[0]]):
+                self.data_max.append([x, y])
 
-        for peak in self.data_max.copy():
-            sosed = [p1 for p1 in self.data_max.copy() if abs(p1[0]-peak[0])<distance]
-            if len(sosed) == 1:
-                self.data_max.remove(peak)
+            for peak in self.data_max.copy():
+                sosed = [p1 for p1 in self.data_max.copy() if abs(p1[0]-peak[0])<self.distance]
+                if len(sosed) == 1:
+                    self.data_max = [i for i in self.data_max if i < peak] # сохранение всех макс до первого одиночного
+                    break
 
-        for x, y in zip(radii[peaks_min-ind_min[0]], mean_brightness[peaks_min-ind_min[0]]):
-            data_min.append([x, y])
+            for x, y in zip(radii[peaks_min-ind_min[0]], mean_brightness[peaks_min-ind_min[0]]):
+                data_min.append([x, y])
 
-        data_min.sort()
-        ind = 0
-        while data_min[ind] < max(self.data_max):
-            ind += 1
-        ind_max = np.where(radii < data_min[ind][0])[0]  # Индексы элементов < radii[peaks_min][0]
-        radii = radii[ind_max]
-        mean_brightness = mean_brightness[ind_max]
-
+            data_min.sort()
+            ind = 0
+            while data_min[ind] < max(self.data_max):
+                ind += 1
+            ind_max = np.where(radii < data_min[ind][0])[0]  # Индексы элементов < radii[peaks_min][0]
+            radii = radii[ind_max]
+            mean_brightness = mean_brightness[ind_max]
+        else:
+            for x, y in zip(radii[peaks], mean_brightness[peaks]):
+                self.data_max.append([x, y])
 
         # Создаем фигуру Matplotlib
         self.fig = Figure(figsize=(9.8, 3.1), dpi=100)
@@ -352,9 +364,6 @@ class App:
                 self.ax.text(x, y, str(int(y)), fontsize=7, ha='center', va='bottom')
                 self.ax.scatter(x, y, color='red', label='Максимумы')
 
-        if self.x2 != '0': #края графика
-            self.ax.set_xlim(int(self.x1), int(self.x2))
-
         self.plot_frame = tk.Frame()
         self.plot_frame.place(x=13, y=383, width=978, height=360)
 
@@ -367,21 +376,61 @@ class App:
         self.toolbar.update()
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+    def get_data(self):
+        data = []
+        if self.threshold.get() == '':
+            for thr in range(250, 20, -10):
+                self.threshold = str(thr)
+                min_data = thr*1660
+                img_thr = self.img.point(lambda x: 255 if x > int(self.threshold) else 0)
+
+                img_arr = np.asarray(img_thr)
+
+                for stroka in range(len(img_arr)):
+                    for stolb in range(len(img_arr[stroka])):
+                        # значение пикселя, stroka - номер строчки, stolb - номер столбца
+                        if img_arr[stroka][stolb] == 255:
+                            data.append([stolb, stroka])
+                #print(len(data), '- пикселей')
+
+                if len(data) > 3_000_000 or len(data) < min_data:
+                    data = []
+                    continue
+                else:
+                    return data
+            return None
+        else:
+            self.threshold = str(self.threshold.get())
+            img_thr = self.img.point(lambda x: 255 if x > int(self.threshold) else 0)
+
+            img_arr = np.asarray(img_thr)
+
+            for stroka in range(len(img_arr)):
+                for stolb in range(len(img_arr[stroka])):
+                    # значение пикселя, stroka - номер строчки, stolb - номер столбца
+                    if img_arr[stroka][stolb] == 255:
+                        data.append([stolb, stroka])
+            # print(len(data), '- пикселей')
+            return data
+
     def get_x(self):
         self.x1 = self.entry_var1.get()
         self.x2 = self.entry_var2.get()
+        if self.x1 == '':
+            self.x1 = '0'
+        if self.x2 == '':
+            self.x2 = str(int(self.max_radius)**2)
         self.graf()
 
     def checkbutton_changed(self):
-        self.enabled.get()
         self.graf()
 
     def formula(self):
         inp_d = float(self.d.get())
         sp_v = []
-        for i in range(len(self.data_max) - 3):
-            sp_v.append((self.data_max[i + 2][0] - self.data_max[i + 1][0]) / (
-                        self.data_max[i + 3][0] - self.data_max[i][0]) / (2 * inp_d))
+        for i in range(0, len(self.data_max) - 3, 2):
+            sp_v.append((self.data_max[i + 3][0] - self.data_max[i + 2][0]) / (self.data_max[i + 3][0] - self.data_max[i+1][0]) / (2 * inp_d))
+            #print(self.data_max[i + 3][0], self.data_max[i + 2][0],  self.data_max[i + 3][0], self.data_max[i+1][0], (2 * inp_d))
         self.v = int((sum(sp_v) / len(sp_v)) * 10000) / 10000
         self.v_out = tk.IntVar()
         self.v_out.set(self.v)
